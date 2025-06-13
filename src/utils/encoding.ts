@@ -50,3 +50,16 @@ export function generateRandomId(length: number = 8): string {
   }
   return result;
 }
+
+/**
+ * Secure memory cleanup for sensitive data
+ */
+export function secureWipe(data: any): void {
+  if (data && typeof data === 'object') {
+    Object.keys(data).forEach(key => {
+      if (data[key]) {
+        data[key] = null;
+      }
+    });
+  }
+}
