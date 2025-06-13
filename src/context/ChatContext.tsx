@@ -21,7 +21,7 @@ interface ChatContextType {
   isConnected: boolean;
   isPaired: boolean;
   pairingCode: string | null;
-  sendMessage: (content: string, type: 'text' | 'image' | 'audio') => Promise<void>;
+  sendMessage: (content: string, type: 'text' | 'image' | 'audio' | 'document') => Promise<void>;
   generateCode: () => Promise<string>;
   joinChat: (code: string) => Promise<boolean>;
   leaveChat: () => void;
@@ -43,21 +43,51 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isPaired, setIsPaired] = useState(false);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [userId] = useState(() => uuidv4());
+  const [messageIndex, setMessageIndex] = useState(0);
   const crypto = useCrypto();
 
   useEffect(() => {
+    // Initialize crypto keys and certificate when component mounts
+    const initializeCrypto = async () => {
+      try {
+        await crypto.generateSigningKeyPair();
+        await crypto.generateCertificate(`user-${userId.slice(0, 8)}`);
+      } catch (error) {
+        console.error('Failed to initialize crypto:', error);
+      }
+    };
+
+    initializeCrypto();
+  }, [crypto, userId]);
+
+  useEffect(() => {
     // Listen for messages from other tabs
-    broadcastChannel.onmessage = (event) => {
+    broadcastChannel.onmessage = async (event) => {
       if (event.data.type === 'message' && event.data.roomCode === pairingCode) {
-        const newMessage: Message = {
-          id: uuidv4(),
-          content: event.data.content,
-          type: event.data.messageType,
-          timestamp: Date.now(),
-          sender: 'peer',
-          encrypted: true
-        };
-        setMessages(prev => [...prev, newMessage]);
+        try {
+          // Verify message signature
+          const isVerified = await crypto.verifyMessage(
+            event.data.content,
+            event.data.signature,
+            event.data.certificate
+          );
+
+          const newMessage: Message = {
+            id: uuidv4(),
+            content: event.data.content,
+            type: event.data.messageType,
+            timestamp: Date.now(),
+            sender: 'peer',
+            encrypted: true,
+            verified: isVerified,
+            signature: event.data.signature,
+            senderCert: event.data.certificate
+          };
+
+          setMessages(prev => [...prev, newMessage]);
+        } catch (error) {
+          console.error('Failed to process received message:', error);
+        }
       } else if (event.data.type === 'room_closed' && event.data.roomCode === pairingCode) {
         leaveChat();
       }
@@ -66,7 +96,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       broadcastChannel.onmessage = null;
     };
-  }, [pairingCode]);
+  }, [pairingCode, crypto]);
 
   const generateCode = async (): Promise<string> => {
     try {
@@ -116,19 +146,28 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const sendMessage = async (content: string, type: 'text' | 'image' | 'audio'): Promise<void> => {
-    if (!isPaired || !pairingCode) {
-      throw new Error('Not connected or paired');
+  const sendMessage = async (
+    content: string,
+    type: 'text' | 'image' | 'audio' | 'document'
+  ): Promise<void> => {
+    if (!isPaired || !pairingCode || !crypto.certificate) {
+      throw new Error('Not connected, paired, or certificate not available');
     }
 
     try {
+      // Sign the message
+      const signature = await crypto.signMessage(content);
+
       const message: Message = {
         id: uuidv4(),
         content,
         type,
         timestamp: Date.now(),
         sender: 'self',
-        encrypted: true
+        encrypted: true,
+        verified: true, // Self messages are always verified
+        signature,
+        senderCert: crypto.certificate
       };
 
       setMessages(prev => [...prev, message]);
@@ -138,8 +177,12 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         type: 'message',
         roomCode: pairingCode,
         content,
-        messageType: type
+        messageType: type,
+        signature,
+        certificate: crypto.certificate
       });
+
+      setMessageIndex(prev => prev + 1);
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
@@ -163,6 +206,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setMessages([]);
     setIsPaired(false);
     setPairingCode(null);
+    setMessageIndex(0);
     crypto.reset();
   };
 

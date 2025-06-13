@@ -1,6 +1,6 @@
 import React from 'react';
 import { Message } from '../types';
-import { Lock, AlertTriangle } from 'lucide-react';
+import { Lock, AlertTriangle, CheckCircle, XCircle, Shield } from 'lucide-react';
 
 interface MessageListProps {
   messages: Message[];
@@ -72,19 +72,62 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
                       </audio>
                     </div>
                   )}
+
+                  {message.type === 'document' && (
+                    <div className="my-1 p-3 bg-gray-600 rounded-lg">
+                      <div className="flex items-center space-x-2">
+                        <Shield className="w-5 h-5 text-blue-400" />
+                        <div>
+                          <p className="font-medium">Signed Document</p>
+                          <p className="text-sm opacity-75">Click to download</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   
-                  {/* Message footer with time and encryption status */}
-                  <div className="flex items-center justify-end mt-1 space-x-1">
-                    <span className="text-xs opacity-70">
-                      {formatTime(message.timestamp)}
-                    </span>
-                    
-                    {message.encrypted ? (
-                      <Lock className="w-3 h-3 opacity-70" />
-                    ) : (
-                      <AlertTriangle className="w-3 h-3 text-amber-400" />
-                    )}
+                  {/* Message footer with time, encryption status, and signature verification */}
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center space-x-1">
+                      <span className="text-xs opacity-70">
+                        {formatTime(message.timestamp)}
+                      </span>
+                      
+                      {message.encrypted ? (
+                        <Lock className="w-3 h-3 opacity-70" />
+                      ) : (
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      )}
+                    </div>
+
+                    {/* Signature verification indicator */}
+                    <div className="flex items-center space-x-1">
+                      {message.signature && (
+                        <>
+                          {message.verified ? (
+                            <CheckCircle className="w-3 h-3 text-green-400" title="Signature verified" />
+                          ) : (
+                            <XCircle className="w-3 h-3 text-red-400" title="Signature verification failed" />
+                          )}
+                        </>
+                      )}
+                      
+                      {message.senderCert && (
+                        <div className="text-xs opacity-70" title={`From: ${message.senderCert.subject}`}>
+                          🏆
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Certificate info for peer messages */}
+                  {message.sender === 'peer' && message.senderCert && (
+                    <div className="mt-2 pt-2 border-t border-gray-600 text-xs opacity-75">
+                      <div className="flex items-center space-x-1">
+                        <Shield className="w-3 h-3" />
+                        <span>Cert: {message.senderCert.subject}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -96,7 +139,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
         <div className="flex flex-col items-center justify-center h-40 text-gray-500">
           <Lock className="w-8 h-8 mb-2 opacity-50" />
           <p>Your conversation is end-to-end encrypted</p>
-          <p className="text-sm mt-1">Messages will disappear when you close this chat</p>
+          <p className="text-sm mt-1">Messages are digitally signed and verified</p>
+          <p className="text-sm">Messages will disappear when you close this chat</p>
         </div>
       )}
     </div>

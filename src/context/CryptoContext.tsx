@@ -1,15 +1,25 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { KeyPair, EncryptedData } from '../types';
+import { KeyPair, EncryptedData, SigningKeyPair, Certificate } from '../types';
+import { CertificateManager } from '../utils/certificates';
+import { DigitalSigner } from '../utils/signing';
+import { ForwardSecrecy } from '../utils/forwardSecrecy';
 
 interface CryptoContextType {
   keyPair: KeyPair | null;
+  signingKeyPair: SigningKeyPair | null;
+  certificate: Certificate | null;
   sharedSecret: CryptoKey | null;
   generateKeyPair: () => Promise<KeyPair>;
+  generateSigningKeyPair: () => Promise<SigningKeyPair>;
+  generateCertificate: (subject: string) => Promise<Certificate>;
   generatePairingCode: () => Promise<string>;
   encryptMessage: (message: string) => Promise<EncryptedData>;
-  decryptMessage: (encryptedData: EncryptedData) => Promise<string>;
+  decryptMessage: (encryptedData: EncryptedData, messageIndex?: number) => Promise<string>;
+  signMessage: (message: string) => Promise<string>;
+  verifyMessage: (message: string, signature: string, senderCert: Certificate) => Promise<boolean>;
   exportPublicKey: (key: CryptoKey) => Promise<string>;
   importPublicKey: (keyData: string) => Promise<CryptoKey>;
+  verifyCertificate: (cert: Certificate) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -25,9 +35,12 @@ export const useCrypto = () => {
 
 export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [keyPair, setKeyPair] = useState<KeyPair | null>(null);
+  const [signingKeyPair, setSigningKeyPair] = useState<SigningKeyPair | null>(null);
+  const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [sharedSecret, setSharedSecret] = useState<CryptoKey | null>(null);
+  const [certificateManager] = useState(() => CertificateManager.getInstance());
 
-  // Generate a new key pair
+  // Generate ECDH key pair for encryption
   const generateKeyPair = async (): Promise<KeyPair> => {
     const newKeyPair = await window.crypto.subtle.generateKey(
       {
@@ -47,6 +60,27 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return pair;
   };
 
+  // Generate ECDSA key pair for signing
+  const generateSigningKeyPair = async (): Promise<SigningKeyPair> => {
+    const newKeyPair = await certificateManager.generateSigningKeyPair();
+    setSigningKeyPair(newKeyPair);
+    return newKeyPair;
+  };
+
+  // Generate certificate for user
+  const generateCertificate = async (subject: string): Promise<Certificate> => {
+    if (!signingKeyPair) {
+      throw new Error('Signing key pair not generated');
+    }
+
+    const cert = await certificateManager.issueCertificate(
+      subject,
+      signingKeyPair.publicKey
+    );
+    setCertificate(cert);
+    return cert;
+  };
+
   // Generate a secure random pairing code
   const generatePairingCode = async (): Promise<string> => {
     const array = new Uint8Array(4);
@@ -59,48 +93,60 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return code;
   };
 
-  // Encrypt a message using AES-GCM
+  // Encrypt a message using forward secrecy
   const encryptMessage = async (message: string): Promise<EncryptedData> => {
     if (!sharedSecret) {
       throw new Error('No shared secret established');
     }
 
-    const encoder = new TextEncoder();
-    const data = encoder.encode(message);
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-
-    const encryptedData = await window.crypto.subtle.encrypt(
-      {
-        name: 'AES-GCM',
-        iv
-      },
-      sharedSecret,
-      data
-    );
-
-    return {
-      data: new Uint8Array(encryptedData),
-      iv
-    };
+    return await ForwardSecrecy.encryptWithForwardSecrecy(message, sharedSecret);
   };
 
-  // Decrypt a message using AES-GCM
-  const decryptMessage = async (encryptedData: EncryptedData): Promise<string> => {
+  // Decrypt a message using forward secrecy
+  const decryptMessage = async (
+    encryptedData: EncryptedData,
+    messageIndex: number = 0
+  ): Promise<string> => {
     if (!sharedSecret) {
       throw new Error('No shared secret established');
     }
 
-    const decryptedData = await window.crypto.subtle.decrypt(
-      {
-        name: 'AES-GCM',
-        iv: encryptedData.iv
-      },
+    return await ForwardSecrecy.decryptWithForwardSecrecy(
+      encryptedData,
       sharedSecret,
-      encryptedData.data
+      messageIndex
     );
+  };
 
-    const decoder = new TextDecoder();
-    return decoder.decode(decryptedData);
+  // Sign a message
+  const signMessage = async (message: string): Promise<string> => {
+    if (!signingKeyPair) {
+      throw new Error('Signing key pair not generated');
+    }
+
+    return await DigitalSigner.signData(message, signingKeyPair.privateKey);
+  };
+
+  // Verify a message signature
+  const verifyMessage = async (
+    message: string,
+    signature: string,
+    senderCert: Certificate
+  ): Promise<boolean> => {
+    try {
+      // First verify the certificate
+      const isCertValid = await certificateManager.verifyCertificate(senderCert);
+      if (!isCertValid) {
+        return false;
+      }
+
+      // Then verify the message signature
+      const senderPublicKey = await certificateManager.importPublicKey(senderCert.publicKey);
+      return await DigitalSigner.verifySignature(message, signature, senderPublicKey);
+    } catch (error) {
+      console.error('Message verification failed:', error);
+      return false;
+    }
   };
 
   // Export public key as base64
@@ -124,23 +170,39 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
   };
 
+  // Verify certificate
+  const verifyCertificate = async (cert: Certificate): Promise<boolean> => {
+    return await certificateManager.verifyCertificate(cert);
+  };
+
   // Reset the crypto context
   const reset = () => {
     setKeyPair(null);
+    setSigningKeyPair(null);
+    setCertificate(null);
     setSharedSecret(null);
+    certificateManager.reset();
+    ForwardSecrecy.resetCounter();
   };
 
   return (
     <CryptoContext.Provider
       value={{
         keyPair,
+        signingKeyPair,
+        certificate,
         sharedSecret,
         generateKeyPair,
+        generateSigningKeyPair,
+        generateCertificate,
         generatePairingCode,
         encryptMessage,
         decryptMessage,
+        signMessage,
+        verifyMessage,
         exportPublicKey,
         importPublicKey,
+        verifyCertificate,
         reset
       }}
     >
