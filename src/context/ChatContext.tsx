@@ -47,20 +47,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const crypto = useCrypto();
 
   useEffect(() => {
-    // Initialize crypto keys and certificate when component mounts
-    const initializeCrypto = async () => {
-      try {
-        await crypto.generateSigningKeyPair();
-        await crypto.generateCertificate(`user-${userId.slice(0, 8)}`);
-      } catch (error) {
-        console.error('Failed to initialize crypto:', error);
-      }
-    };
-
-    initializeCrypto();
-  }, [crypto, userId]);
-
-  useEffect(() => {
     // Listen for messages from other tabs
     broadcastChannel.onmessage = async (event) => {
       if (event.data.type === 'message' && event.data.roomCode === pairingCode) {

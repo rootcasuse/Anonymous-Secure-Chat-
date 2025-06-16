@@ -10,6 +10,7 @@ interface CryptoContextType {
   signingKeyPair: SigningKeyPair | null;
   certificate: Certificate | null;
   sharedSecret: CryptoKey | null;
+  isInitializing: boolean;
   generateKeyPair: () => Promise<KeyPair>;
   generateSigningKeyPair: () => Promise<SigningKeyPair>;
   generateCertificate: (subject: string) => Promise<Certificate>;
@@ -39,7 +40,33 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [signingKeyPair, setSigningKeyPair] = useState<SigningKeyPair | null>(null);
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [sharedSecret, setSharedSecret] = useState<CryptoKey | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [certificateManager] = useState(() => CertificateManager.getInstance());
+
+  // Initialize crypto on mount
+  useEffect(() => {
+    const initializeCrypto = async () => {
+      try {
+        setIsInitializing(true);
+        
+        // Generate signing key pair first
+        const signingKeys = await generateSigningKeyPair();
+        
+        // Get username from localStorage or use default
+        const username = localStorage.getItem('cipher-username') || `user-${Date.now().toString(36)}`;
+        
+        // Generate certificate with username
+        await generateCertificate(username);
+        
+      } catch (error) {
+        console.error('Failed to initialize crypto:', error);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    initializeCrypto();
+  }, []);
 
   // Cleanup on unmount or page unload
   useEffect(() => {
@@ -268,6 +295,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         signingKeyPair,
         certificate,
         sharedSecret,
+        isInitializing,
         generateKeyPair,
         generateSigningKeyPair,
         generateCertificate,
