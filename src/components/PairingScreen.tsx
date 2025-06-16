@@ -10,7 +10,7 @@ interface PairingScreenProps {
 
 const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
   const { generateCode, joinChat, pairingCode } = useChat();
-  const { certificate, isInitializing } = useCrypto();
+  const { certificate, isInitializing, generateCertificate } = useCrypto();
   const [inputCode, setInputCode] = useState('');
   const [username, setUsername] = useState('');
   const [showUsernameInput, setShowUsernameInput] = useState(true);
@@ -22,13 +22,15 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
   // Check if we need to show username input
   useEffect(() => {
     const savedUsername = localStorage.getItem('cipher-username');
-    if (savedUsername && certificate?.subject === savedUsername) {
+    if (savedUsername && certificate) {
       setUsername(savedUsername);
       setShowUsernameInput(false);
+    } else if (savedUsername) {
+      setUsername(savedUsername);
     }
   }, [certificate]);
 
-  const handleSetUsername = () => {
+  const handleSetUsername = async () => {
     if (!username.trim()) {
       setError('Please enter a valid username');
       return;
@@ -39,14 +41,28 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
       return;
     }
 
-    localStorage.setItem('cipher-username', username.trim());
-    setShowUsernameInput(false);
-    setError('');
+    try {
+      localStorage.setItem('cipher-username', username.trim());
+      
+      // Generate certificate with the username
+      await generateCertificate(username.trim());
+      
+      setShowUsernameInput(false);
+      setError('');
+    } catch (error) {
+      setError('Failed to create digital identity. Please try again.');
+      console.error('Certificate generation failed:', error);
+    }
   };
 
   const handleGenerateCode = async () => {
     if (showUsernameInput) {
-      handleSetUsername();
+      await handleSetUsername();
+      return;
+    }
+
+    if (!certificate) {
+      setError('Digital certificate not ready. Please wait or refresh the page.');
       return;
     }
 
@@ -63,12 +79,17 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
 
   const handleJoinChat = async () => {
     if (showUsernameInput) {
-      handleSetUsername();
+      await handleSetUsername();
       return;
     }
 
     if (!inputCode.trim()) {
       setError('Please enter a valid code');
+      return;
+    }
+
+    if (!certificate) {
+      setError('Digital certificate not ready. Please wait or refresh the page.');
       return;
     }
 
@@ -115,8 +136,8 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-900 to-indigo-900 flex flex-col items-center justify-center p-8">
         <div className="text-center">
-          <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-            <Shield className="w-10 h-10 text-white" />
+          <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Shield className="w-10 h-10 text-white animate-pulse" />
           </div>
           <h1 className="text-4xl font-bold mb-3 text-white">Cipher Chat</h1>
           <p className="text-xl text-indigo-300 mb-6">Initializing Security...</p>
@@ -128,7 +149,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
               <div className="w-4 h-4 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
             </div>
             <p className="text-gray-300 text-sm">
-              Generating cryptographic keys and digital certificate...
+              Generating cryptographic keys...
             </p>
           </div>
         </div>
@@ -169,7 +190,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
               <span className="text-green-400 font-medium">Digital Identity Ready</span>
             </div>
             <div className="text-sm text-gray-300 space-y-1">
-              <p><strong>Certificate:</strong> {certificate.subject}</p>
+              <p><strong>Certificate:</strong> {certificate.subject.split('-')[0]}</p>
               <p><strong>Expires:</strong> {formatDate(certificate.expiresAt)}</p>
             </div>
           </div>
@@ -197,12 +218,17 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
               <p className="text-sm text-gray-400">
                 This will be your identity in the chat and on your digital certificate
               </p>
+              <div className="bg-amber-900/30 border border-amber-700 rounded-lg p-3">
+                <p className="text-amber-300 text-sm">
+                  <strong>Note:</strong> If someone else uses the same username, a unique identifier will be added automatically to prevent conflicts.
+                </p>
+              </div>
               <Button
                 onClick={handleSetUsername}
                 className="w-full"
                 disabled={!username.trim()}
               >
-                Set Username
+                Create Digital Identity
                 <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
             </div>
@@ -256,7 +282,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
                   </Button>
                   {!certificate && (
                     <p className="text-sm text-amber-400 mt-2 text-center">
-                      Initializing digital certificate...
+                      Creating digital certificate...
                     </p>
                   )}
                 </>

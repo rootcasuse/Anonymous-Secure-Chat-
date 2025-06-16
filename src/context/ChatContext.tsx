@@ -86,13 +86,18 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const generateCode = async (): Promise<string> => {
     try {
+      if (!crypto.certificate) {
+        throw new Error('Certificate not ready');
+      }
+
       await crypto.generateKeyPair();
       const code = await crypto.generatePairingCode();
       
-      // Save room to localStorage
+      // Save room to localStorage with user certificate info
       const rooms = getRooms();
       rooms[code] = {
         creator: userId,
+        creatorCert: crypto.certificate,
         created: Date.now()
       };
       saveRooms(rooms);
@@ -120,6 +125,16 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (room.creator === userId) {
         console.log('Cannot join your own room');
         return false;
+      }
+
+      // Check for username conflicts and handle them
+      if (room.creatorCert && crypto.certificate) {
+        const creatorUsername = room.creatorCert.subject.split('-')[0];
+        const myUsername = crypto.certificate.subject.split('-')[0];
+        
+        if (creatorUsername === myUsername) {
+          console.log('Username conflict detected, but certificates are unique');
+        }
       }
 
       await crypto.generateKeyPair();

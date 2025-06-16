@@ -43,20 +43,20 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isInitializing, setIsInitializing] = useState(true);
   const [certificateManager] = useState(() => CertificateManager.getInstance());
 
-  // Initialize crypto on mount
+  // Initialize crypto on mount - but don't generate certificate until username is set
   useEffect(() => {
     const initializeCrypto = async () => {
       try {
         setIsInitializing(true);
         
-        // Generate signing key pair first
-        const signingKeys = await generateSigningKeyPair();
+        // Only generate signing key pair initially
+        await generateSigningKeyPair();
         
-        // Get username from localStorage or use default
-        const username = localStorage.getItem('cipher-username') || `user-${Date.now().toString(36)}`;
-        
-        // Generate certificate with username
-        await generateCertificate(username);
+        // Check if we have a saved username and generate certificate
+        const savedUsername = localStorage.getItem('cipher-username');
+        if (savedUsername) {
+          await generateCertificate(savedUsername);
+        }
         
       } catch (error) {
         console.error('Failed to initialize crypto:', error);
@@ -127,12 +127,20 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Generate certificate for user
   const generateCertificate = async (subject: string): Promise<Certificate> => {
     if (!signingKeyPair) {
-      throw new Error('Signing key pair not generated');
+      // If signing key pair doesn't exist, generate it first
+      await generateSigningKeyPair();
+    }
+
+    if (!signingKeyPair) {
+      throw new Error('Signing key pair not available');
     }
 
     try {
+      // Add timestamp to make username unique in case of duplicates
+      const uniqueSubject = `${subject}-${Date.now().toString(36)}`;
+      
       const cert = await certificateManager.issueCertificate(
-        subject,
+        uniqueSubject,
         signingKeyPair.publicKey
       );
       setCertificate(cert);
